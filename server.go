@@ -9,7 +9,11 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/net/publicsuffix"
 )
+
+var defaultRecord = os.Getenv("DEFAULT_RECORD")
 
 func fallback(w http.ResponseWriter, r *http.Request, reason string) {
 	location := "http://redirect.name/"
@@ -19,12 +23,25 @@ func fallback(w http.ResponseWriter, r *http.Request, reason string) {
 	http.Redirect(w, r, location, 302)
 }
 
+func hostnameLookup(host string) ([]string, error) {
+	hostname := fmt.Sprintf("_redirect.%s", host)
+	return net.LookupTXT(hostname)
+}
+
 func handler(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(r.Host, ":")
 	host := parts[0]
 
-	hostname := fmt.Sprintf("_redirect.%s", host)
-	txt, err := net.LookupTXT(hostname)
+	txt, err := hostnameLookup(host)
+	if err != nil {
+		if defaultRecord != "" {
+			tld, _ := publicsuffix.EffectiveTLDPlusOne(host)
+			recursiveHost := fmt.Sprintf("%s.%s", defaultRecord, tld)
+
+			txt, err = hostnameLookup(recursiveHost)
+		}
+	}
+
 	if err != nil {
 		fallback(w, r, fmt.Sprintf("Could not resolve hostname (%v)", err))
 		return
